@@ -1,15 +1,22 @@
 package main
 
-import "net/http"
+import (
+	"log"
+	"net/http"
+)
 
 func main() {
+	const root = "."
+	const port = "8080"
 	serveMux := http.NewServeMux()
+	serveMux.Handle("/", http.FileServer(http.Dir(root)))
 	mux := middlewareCors(serveMux)
 	server := http.Server{
 		Handler: mux,
-		Addr:    "localhost:8080",
+		Addr:    ":" + port,
 	}
-	server.ListenAndServe()
+	log.Printf("Serving files from %s on port: %s\n", root, port)
+	log.Fatal(server.ListenAndServe())
 }
 
 func middlewareCors(next http.Handler) http.Handler {
