@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net/http"
 )
@@ -8,13 +9,22 @@ import (
 func main() {
 	const root = "."
 	const port = "8080"
+
 	serveMux := http.NewServeMux()
-	serveMux.Handle("/", http.FileServer(http.Dir(root)))
+	serveMux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.Dir(root))))
+	serveMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, http.StatusText(http.StatusOK))
+	})
+
 	mux := middlewareCors(serveMux)
+
 	server := http.Server{
 		Handler: mux,
 		Addr:    ":" + port,
 	}
+
 	log.Printf("Serving files from %s on port: %s\n", root, port)
 	log.Fatal(server.ListenAndServe())
 }
