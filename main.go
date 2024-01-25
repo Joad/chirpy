@@ -2,16 +2,37 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/Joad/chirpy/internal/database"
 	"github.com/go-chi/chi/v5"
 )
 
 func main() {
 	const root = "."
 	const port = "8080"
-	apiCfg := &apiConfig{}
+	const path = "database.json"
+
+	dbg := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
+	if *dbg {
+		err := os.Remove(path)
+		if err != nil && !os.IsNotExist(err) {
+			log.Fatal("Error removing database", err)
+			return
+		}
+	}
+	db, err := database.NewDB(path)
+	if err != nil {
+		log.Fatal("Error creating database: ", err)
+		return
+	}
+	apiCfg := &apiConfig{
+		db: db,
+	}
 
 	r := chi.NewRouter()
 
@@ -23,7 +44,14 @@ func main() {
 	rApi.Get("/metrics", apiCfg.writeMetrics())
 	rApi.Handle("/reset", apiCfg.reset())
 	rApi.Get("/healthz", healthz)
-	rApi.Post("/validate_chirp", validateChirp)
+
+	rApi.Post("/chirps", apiCfg.postChirp)
+	rApi.Get("/chirps", apiCfg.getChirps)
+	rApi.Get("/chirps/{chirpid}", apiCfg.getChirp)
+
+	rApi.Post("/users", apiCfg.postUsers)
+
+	rApi.Post("/login", apiCfg.login)
 
 	rAdmin := chi.NewRouter()
 	rAdmin.Get("/metrics", apiCfg.htmlMetrics())
