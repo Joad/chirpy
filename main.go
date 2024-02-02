@@ -9,12 +9,17 @@ import (
 
 	"github.com/Joad/chirpy/internal/database"
 	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
 )
 
 func main() {
 	const root = "."
 	const port = "8080"
 	const path = "database.json"
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
 	dbg := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse()
@@ -31,7 +36,9 @@ func main() {
 		return
 	}
 	apiCfg := &apiConfig{
-		db: db,
+		db:        db,
+		jwtSecret: os.Getenv("JWT_SECRET"),
+		polkaKey:  os.Getenv("POLKA_KEY"),
 	}
 
 	r := chi.NewRouter()
@@ -48,10 +55,16 @@ func main() {
 	rApi.Post("/chirps", apiCfg.postChirp)
 	rApi.Get("/chirps", apiCfg.getChirps)
 	rApi.Get("/chirps/{chirpid}", apiCfg.getChirp)
+	rApi.Delete("/chirps/{chirpid}", apiCfg.deleteChirp)
 
 	rApi.Post("/users", apiCfg.postUsers)
+	rApi.Put("/users", apiCfg.updateUser)
 
 	rApi.Post("/login", apiCfg.login)
+	rApi.Post("/refresh", apiCfg.refresh)
+	rApi.Post("/revoke", apiCfg.revokeToken)
+
+	rApi.Post("/polka/webhooks", apiCfg.polkaWebhook)
 
 	rAdmin := chi.NewRouter()
 	rAdmin.Get("/metrics", apiCfg.htmlMetrics())

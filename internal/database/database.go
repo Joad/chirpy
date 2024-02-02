@@ -4,19 +4,21 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"sort"
 	"sync"
+	"time"
 )
 
 type Chirp struct {
-	Id   int    `json:"id"`
-	Body string `json:"body"`
+	Id       int    `json:"id"`
+	AuthorId int    `json:"author_id"`
+	Body     string `json:"body"`
 }
 
 type User struct {
-	Id       int    `json:"id"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Id          int    `json:"id"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	IsChirpyRed bool   `json:"is_chirpy_red"`
 }
 
 type DB struct {
@@ -25,8 +27,9 @@ type DB struct {
 }
 
 type DBStructure struct {
-	Chirps map[int]Chirp `json:"chirps"`
-	Users  map[int]User  `json:"users"`
+	Chirps      map[int]Chirp        `json:"chirps"`
+	Users       map[int]User         `json:"users"`
+	Revocations map[string]time.Time `json:"revocations"`
 }
 
 func NewDB(path string) (*DB, error) {
@@ -42,8 +45,9 @@ func NewDB(path string) (*DB, error) {
 func (db *DB) ensureDB() error {
 	if _, err := os.Stat(db.path); os.IsNotExist(err) {
 		return db.writeDB(DBStructure{
-			Chirps: make(map[int]Chirp),
-			Users:  make(map[int]User),
+			Chirps:      make(map[int]Chirp),
+			Users:       make(map[int]User),
+			Revocations: make(map[string]time.Time),
 		})
 	} else if err != nil {
 		return err
@@ -74,7 +78,7 @@ func (db *DB) writeDB(dbstruct DBStructure) error {
 	return err
 }
 
-func (db *DB) CreateChirp(body string) (Chirp, error) {
+func (db *DB) CreateChirp(body string, authorId int) (Chirp, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 	dbstruct, err := db.loadDB()
@@ -84,8 +88,9 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 	id := len(dbstruct.Chirps) + 1
 
 	newChirp := Chirp{
-		Id:   id,
-		Body: body,
+		Id:       id,
+		AuthorId: authorId,
+		Body:     body,
 	}
 	dbstruct.Chirps[id] = newChirp
 
@@ -108,9 +113,6 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 	for _, chirp := range dbstruct.Chirps {
 		chirps = append(chirps, chirp)
 	}
-	sort.Slice(chirps, func(i, j int) bool {
-		return chirps[i].Id < chirps[j].Id
-	})
 	return chirps, nil
 }
 
@@ -127,6 +129,18 @@ func (db *DB) GetChirpById(id int) (Chirp, bool, error) {
 		return Chirp{}, false, nil
 	}
 	return chirp, true, nil
+}
+
+func (db *DB) DeleteChirp(id int) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	dbstruct, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	delete(dbstruct.Chirps, id)
+	db.writeDB(dbstruct)
+	return nil
 }
 
 func (db *DB) CreateUser(email string, password string) (User, error) {
@@ -178,4 +192,61 @@ func (db *DB) GetUserByEmail(email string) (User, error) {
 	}
 
 	return user, nil
+}
+
+func (db *DB) UpdateUser(id int, email string, password string) (User, error) {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	dbstruct, err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+	user, ok := dbstruct.Users[id]
+	if !ok {
+		return User{}, errors.New("User not found")
+	}
+	user.Email = email
+	user.Password = password
+	dbstruct.Users[id] = user
+	err = db.writeDB(dbstruct)
+	return user, err
+}
+
+func (db *DB) UpgradeUser(id int) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	dbstruct, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	user, ok := dbstruct.Users[id]
+	if !ok {
+		return errors.New("User not found")
+	}
+	user.IsChirpyRed = true
+	dbstruct.Users[id] = user
+	return db.writeDB(dbstruct)
+}
+
+func (db *DB) IsTokenRevoked(token string) (bool, error) {
+	db.mux.RLock()
+	defer db.mux.RUnlock()
+	dbstruct, err := db.loadDB()
+	if err != nil {
+		return false, err
+	}
+	_, found := dbstruct.Revocations[token]
+	return found, nil
+}
+
+func (db *DB) RevokeToken(token string, revocationTime time.Time) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+	dbstruct, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	dbstruct.Revocations[token] = revocationTime
+	return db.writeDB(dbstruct)
 }
